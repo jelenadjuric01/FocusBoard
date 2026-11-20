@@ -1,0 +1,6 @@
+#!/bin/bash
+# FocusBoard CLI Entry Point
+# Usage: ./focusboard <command> [arguments]
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+java -jar "$SCRIPT_DIR/build/FocusBoard.jar" "$@"
