@@ -1,135 +1,190 @@
 package test
 
 import main.model.Task
-import main.storage.TaskStore
+import main.storage.*
 import java.io.File
-import kotlin.test.*
 
 class TaskStoreTest {
 
-    private val tempFile = File("test_tasks_${System.currentTimeMillis()}.json")
-    private val store = TaskStore(tempFile.absolutePath)
+    companion object {
+        private var fileCounter = 0
 
-    @AfterTest
-    fun cleanup() {
-        tempFile.delete()
-    }
+        private fun createTempStore(): Pair<TaskStore, File> {
+            fileCounter++
+            val tempFile = File("test_tasks_${System.currentTimeMillis()}_$fileCounter.json")
+            val store = TaskStore(tempFile.absolutePath)
+            return store to tempFile
+        }
 
-    @Test
-    fun `given no file when load then returns empty list`() {
-        val tasks = store.load()
-        assertTrue(tasks.isEmpty())
-    }
+        val suite = TestSuite("TaskStoreTest", listOf(
+            TestEntry("given no file when load then returns empty list") {
+                val (store, tempFile) = createTempStore()
+                assertTrue(store.load().isEmpty())
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given empty list when save and load then returns empty list`() {
-        store.save(emptyList())
-        val tasks = store.load()
-        assertTrue(tasks.isEmpty())
-    }
+            TestEntry("given empty list when save and load then returns empty list") {
+                val (store, tempFile) = createTempStore()
+                store.save(emptyList())
+                assertTrue(store.load().isEmpty())
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given task when addTask then task is persisted`() {
-        val task = Task.create("Test task")
-        val result = store.addTask(task)
+            TestEntry("given task when addTask then task is persisted with id 1") {
+                val (store, tempFile) = createTempStore()
+                val task = store.addTask("Test task")
 
-        assertEquals(1, result.size)
-        assertEquals(task.id, result[0].id)
-        assertEquals(task.title, result[0].title)
-        assertFalse(result[0].done)
-    }
+                assertEquals("1", task.id)
+                assertEquals("Test task", task.title)
+                assertFalse(task.done)
+                assertEquals(1, store.load().size)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given multiple tasks when add then all persisted`() {
-        store.addTask(Task.create("Task 1"))
-        store.addTask(Task.create("Task 2"))
-        store.addTask(Task.create("Task 3"))
+            TestEntry("given multiple tasks when add then ids are sequential") {
+                val (store, tempFile) = createTempStore()
+                val task1 = store.addTask("Task 1")
+                val task2 = store.addTask("Task 2")
+                val task3 = store.addTask("Task 3")
 
-        val tasks = store.load()
-        assertEquals(3, tasks.size)
-    }
+                assertEquals("1", task1.id)
+                assertEquals("2", task2.id)
+                assertEquals("3", task3.id)
+                assertEquals(3, store.load().size)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given task when markDone then task is completed`() {
-        val task = Task.create("To complete")
-        store.addTask(task)
+            TestEntry("given task when markDone then task is completed") {
+                val (store, tempFile) = createTempStore()
+                val task = store.addTask("To complete")
 
-        val result = store.markDone(task.id)
-        assertNotNull(result)
-        val updated = result!!.find { it.id == task.id }
-        assertNotNull(updated)
-        assertTrue(updated!!.done)
-    }
+                val result = store.markDone(task.id)
+                assertTrue(result is MarkDoneResult.Done)
+                val doneTask = (result as MarkDoneResult.Done).task
+                assertTrue(doneTask.done)
+                assertEquals(task.id, doneTask.id)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given no matching id when markDone then returns null`() {
-        val result = store.markDone("nonexistent")
-        assertNull(result)
-    }
+            TestEntry("given no matching id when markDone then returns NotFound") {
+                val (store, tempFile) = createTempStore()
+                val result = store.markDone("nonexistent")
+                assertTrue(result is MarkDoneResult.NotFound)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given task when delete then task is removed`() {
-        val task = Task.create("To delete")
-        store.addTask(task)
+            TestEntry("given already done task when markDone then returns AlreadyDone") {
+                val (store, tempFile) = createTempStore()
+                val task = store.addTask("Already done")
+                store.markDone(task.id)
 
-        val result = store.deleteTask(task.id)
-        assertNotNull(result)
-        val remaining = result!!.filter { it.id == task.id }
-        assertTrue(remaining.isEmpty())
-    }
+                val result = store.markDone(task.id)
+                assertTrue(result is MarkDoneResult.AlreadyDone)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given no matching id when delete then returns null`() {
-        val result = store.deleteTask("nonexistent")
-        assertNull(result)
-    }
+            TestEntry("given task when delete then task is removed") {
+                val (store, tempFile) = createTempStore()
+                val task = store.addTask("To delete")
 
-    @Test
-    fun `given tasks when search matching query then returns matches`() {
-        store.addTask(Task.create("Buy milk"))
-        store.addTask(Task.create("Buy bread"))
-        store.addTask(Task.create("Call mom"))
+                val result = store.deleteTask(task.id)
+                assertTrue(result is DeleteResult.Deleted)
+                val remaining = store.load().filter { it.id == task.id }
+                assertTrue(remaining.isEmpty())
+                tempFile.delete()
+            },
 
-        val results = store.search("milk")
-        assertEquals(1, results.size)
-        assertEquals("Buy milk", results[0].title)
-    }
+            TestEntry("given no matching id when delete then returns NotFound") {
+                val (store, tempFile) = createTempStore()
+                val result = store.deleteTask("nonexistent")
+                assertTrue(result is DeleteResult.NotFound)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given tasks when search case insensitive then returns matches`() {
-        store.addTask(Task.create("Buy Milk"))
+            TestEntry("given deleted task when markDone then returns NotFound") {
+                val (store, tempFile) = createTempStore()
+                val task = store.addTask("To delete")
+                store.deleteTask(task.id)
 
-        val results = store.search("milk")
-        assertEquals(1, results.size)
-    }
+                val result = store.markDone(task.id)
+                assertTrue(result is MarkDoneResult.NotFound)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given tasks when search no match then returns empty`() {
-        store.addTask(Task.create("Buy milk"))
+            TestEntry("given task with special chars when save and load then title preserved") {
+                val (store, tempFile) = createTempStore()
+                store.addTask("Task with \"quotes\" and \\backslash")
 
-        val results = store.search("eggs")
-        assertTrue(results.isEmpty())
-    }
+                val loaded = store.load()
+                assertEquals(1, loaded.size)
+                assertEquals("Task with \"quotes\" and \\backslash", loaded[0].title)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given task with special chars when save and load then title preserved`() {
-        val task = Task.create("Task with \"quotes\" and \\backslash")
-        store.addTask(task)
+            TestEntry("given tasks with done flag when save and load then done flag preserved") {
+                val (store, tempFile) = createTempStore()
+                val task1 = Task.create("1", "Done task").copy(done = true)
+                val task2 = Task.create("2", "Pending task")
+                store.save(listOf(task1, task2))
 
-        val loaded = store.load()
-        assertEquals(1, loaded.size)
-        assertEquals(task.title, loaded[0].title)
-    }
+                val loaded = store.load()
+                assertEquals(2, loaded.size)
+                assertTrue(loaded[0].done)
+                assertFalse(loaded[1].done)
+                tempFile.delete()
+            },
 
-    @Test
-    fun `given tasks with done flag when save and load then done flag preserved`() {
-        val task1 = Task.create("Done task").copy(done = true)
-        val task2 = Task.create("Pending task")
-        store.save(listOf(task1, task2))
+            TestEntry("given task with backslash-n when save and load then title preserved") {
+                val (store, tempFile) = createTempStore()
+                store.addTask("C:\\new")
 
-        val loaded = store.load()
-        assertEquals(2, loaded.size)
-        assertTrue(loaded[0].done)
-        assertFalse(loaded[1].done)
+                val loaded = store.load()
+                assertEquals(1, loaded.size)
+                assertEquals("C:\\new", loaded[0].title)
+                tempFile.delete()
+            },
+
+            TestEntry("given task with curly brace when save and load then title preserved") {
+                val (store, tempFile) = createTempStore()
+                store.addTask("fix {foo}")
+
+                val loaded = store.load()
+                assertEquals(1, loaded.size)
+                assertEquals("fix {foo}", loaded[0].title)
+                tempFile.delete()
+            },
+
+            TestEntry("given task with newline when save and load then title preserved") {
+                val (store, tempFile) = createTempStore()
+                store.addTask("Line1\nLine2")
+
+                val loaded = store.load()
+                assertEquals(1, loaded.size)
+                assertEquals("Line1\nLine2", loaded[0].title)
+                tempFile.delete()
+            },
+
+            TestEntry("given task with emoji when save and load then title preserved") {
+                val (store, tempFile) = createTempStore()
+                store.addTask("Buy 🍎 apples")
+
+                val loaded = store.load()
+                assertEquals(1, loaded.size)
+                assertEquals("Buy 🍎 apples", loaded[0].title)
+                tempFile.delete()
+            },
+
+            TestEntry("given tasks deleted when add new then id continues from max") {
+                val (store, tempFile) = createTempStore()
+                store.addTask("Task 1")
+                store.addTask("Task 2")
+                store.addTask("Task 3")
+                store.deleteTask("2")
+
+                val task4 = store.addTask("Task 4")
+                assertEquals("4", task4.id)
+                tempFile.delete()
+            }
+        ))
     }
 }

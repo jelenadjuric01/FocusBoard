@@ -3,4 +3,10 @@
 # Usage: ./focusboard <command> [arguments]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Build if JAR doesn't exist
+if [ ! -f "$SCRIPT_DIR/build/FocusBoard.jar" ]; then
+    "$SCRIPT_DIR/build.sh"
+fi
+
 java -jar "$SCRIPT_DIR/build/FocusBoard.jar" "$@"

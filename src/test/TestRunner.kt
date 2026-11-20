@@ -1,57 +1,74 @@
 package test
 
-import kotlin.reflect.full.memberFunctions
+/**
+ * Simple test runner without reflection — tests are registered explicitly.
+ */
 
-fun runTestClass(className: String): Int {
-    val kClass = Class.forName(className).kotlin
-    val instance = kClass.createInstance() as Any
-    val testMethods = kClass.memberFunctions.filter {
-        it.annotations.any { ann -> ann.annotationClass == Test::class }
+typealias TestFunction = () -> Unit
+
+data class TestEntry(
+    val name: String,
+    val function: TestFunction
+)
+
+class TestSuite(
+    val name: String,
+    val tests: List<TestEntry>,
+    val cleanup: (() -> Unit)? = null
+)
+
+object TestRunner {
+    private val suites = mutableListOf<TestSuite>()
+
+    fun register(suite: TestSuite) {
+        suites.add(suite)
     }
 
-    var passed = 0
-    var failed = 0
+    fun runAll(): Boolean {
+        var totalPassed = 0
+        var totalFailed = 0
 
-    for (method in testMethods) {
-        val testName = method.name
-        try {
-            // Run cleanup before each test
-            val cleanupMethod = kClass.memberFunctions.find { it.name == "cleanup" }
-            cleanupMethod?.call(instance)
-
-            method.call(instance)
-            println("  ✓ $testName")
-            passed++
-        } catch (e: Exception) {
-            println("  ✗ $testName")
-            println("    ${e.message}")
-            failed++
+        for (suite in suites) {
+            println("Running ${suite.name}...")
+            var suitePassed = 0
+            var suiteFailed = 0
+            for (test in suite.tests) {
+                try {
+                    suite.cleanup?.invoke()
+                    test.function.invoke()
+                    println("  ✓ ${test.name}")
+                    suitePassed++
+                    totalPassed++
+                } catch (e: Exception) {
+                    println("  ✗ ${test.name}")
+                    println("    ${e.message}")
+                    suiteFailed++
+                    totalFailed++
+                }
+            }
+            println("  $suitePassed passed, $suiteFailed failed")
+            println()
         }
-    }
 
-    println("  $passed passed, $failed failed")
-    return failed
+        println("Total: $totalPassed passed, $totalFailed failed")
+        return totalFailed == 0
+    }
 }
 
-fun main(args: Array<String>) {
-    val testClasses = if (args.isEmpty()) {
-        listOf("test.TaskTest", "test.TaskStoreTest")
-    } else {
-        args.toList()
-    }
+class TestRunnerMain {
+    companion object {
+        @JvmStatic
+        fun main(args: Array<String>) {
+            // Register all test suites
+            TestRunner.register(TaskTest.suite)
+            TestRunner.register(TaskStoreTest.suite)
 
-    var totalFailed = 0
-    for (testClass in testClasses) {
-        println("Running $testClass...")
-        val failed = runTestClass(testClass)
-        totalFailed += failed
-        println()
-    }
-
-    if (totalFailed > 0) {
-        println("FAILED: $totalFailed test(s) failed")
-        System.exit(1)
-    } else {
-        println("All tests passed!")
+            val success = TestRunner.runAll()
+            if (!success) {
+                System.exit(1)
+            } else {
+                println("All tests passed!")
+            }
+        }
     }
 }
